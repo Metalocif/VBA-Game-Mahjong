@@ -1,0 +1,152 @@
+Dim Floors() As Variant, Floor() As String, ColorArray() As Variant
+Dim NumberOfFloors As Integer
+'An array of 2D Arrays of strings.
+
+Sub Mahjong()
+    'An attempt at coding a game of Mahjong.
+    'You can set the value of NumberOfFloors to whatever you want and it will dynamically create a correctly sized pyramid.
+    'You play by clicking cells. If you clicked two cells in a row with the same value, they are both removed.
+    'I highlight selected cells using a pattern color on top of the background color.
+    'This is why there are a lot of .Pattern properties everywhere, you can ignore them.
+    
+    'The important part is the use of an array of arrays to store the floors.
+    'We also use a collection at the start to represent the bag of tiles.
+    'It's a collection because collections are easy to add to and remove from.
+    Dim Tiles As New Collection
+    
+    NumberOfFloors = 4
+    ReDim Floors(1 To NumberOfFloors)
+    NumberOfTiles = NumberOfFloors / 3 * (4 * (NumberOfFloors) ^ 2 + 12 * NumberOfFloors + 11)
+    'A magic formula.
+    ReDim ColorArray(1 To NumberOfFloors)
+    For i = LBound(ColorArray) To UBound(ColorArray)
+        ColorArray(i) = RGB(255 - (i - 1) * 50, 255 - (i - 1) * 50, 255 - (i - 1) * 50)
+        'The grayscale colors we use to represent floors. Bottom floor is white, 1st floor is light grey, 2nd is darker...
+        'We store them in an array to convert easily between floor number and color when drawing the board.
+    Next i
+    For i = 10000 To 10000 + NumberOfTiles / 4 - 1
+        '10000 because this is where Unicode characters that look like drawings start (I like round numbers and I cannot lie)
+        Tiles.Add WorksheetFunction.Unichar(i)
+        Tiles.Add WorksheetFunction.Unichar(i)
+        Tiles.Add WorksheetFunction.Unichar(i)
+        Tiles.Add WorksheetFunction.Unichar(i)
+        'We add each character four times, so that the game is winnable.
+    Next i
+    For k = 1 To NumberOfFloors
+        FloorSize = 1 + (NumberOfFloors - k + 1) * 2    'First floor is 1 + 4 * 2 = 9 tiles wide, second is 7, third is 5...
+        ReDim Floor(k To FloorSize + k - 1, k To FloorSize + k - 1)
+        'The arrays will go from 1 to 9, 2 to 8, 3 to 7... so they match their visuals.
+        For i = LBound(Floor) To UBound(Floor)
+            For j = LBound(Floor) To UBound(Floor)
+                TileIndex = WorksheetFunction.RandBetween(1, Tiles.Count)
+                Floor(i, j) = Tiles(TileIndex)
+                Tiles.Remove (TileIndex)
+                'We pick a tile from the bag and place it on the pyramid, then remove it from the bag.
+                If Tiles.Count = 0 Then Exit For
+            Next j
+            If Tiles.Count = 0 Then Exit For
+        Next i
+        Floors(k) = Floor   'We generated a 2D array and assign it to the Kth element of the array Floors.
+    Next k
+    'This makes an array of 2D arrays, filled with the Tiles.
+    Call DisplayLevels
+    'Displays the levels; does not overwrite tiles with empty values.
+End Sub
+
+Private Sub DisplayLevels()
+    Application.ScreenUpdating = False
+    FloorSize = 1 + NumberOfFloors * 2
+    Range(Cells(1, 1), Cells(FloorSize, FloorSize)).Clear
+    Range(Cells(1, 1), Cells(FloorSize, FloorSize)).Font.Size = 22
+    Range(Cells(1, 1), Cells(FloorSize, FloorSize)).HorizontalAlignment = xlCenter
+    For Each Level In Floors
+        For i = LBound(Level) To UBound(Level)
+            For j = LBound(Level) To UBound(Level)
+                If Level(i, j) <> "" Then
+                    If Cells(i, j) <> "" Then
+                        Cells(i, j).Interior.Color = ColorArray(MyMatch(ColorArray, Cells(i, j).Interior.Color) + 1)
+                        'We are overwriting the color in the cell with the one that is one level grayer.
+                        'To do that, we find the index of the color currently used in the cell in the ColorArray.
+                        'White is 0, Light gray is 1, middle gray is 2, and so on.
+                        'And we replace that color with the one at the next index (hence the +1).
+                    End If
+                    Cells(i, j) = Level(i, j)
+                    'We replace the value either way.
+                End If
+            Next j
+        Next i
+    Next Level
+    For Each Cell In Range(Cells(1, 1), Cells(FloorSize, FloorSize))
+        If Cell.Value <> "" Then Cell.Borders.LineStyle = xlContinuous
+        'We only give the cell borders if it contains a tile.
+    Next Cell
+    [A1].CurrentRegion.Interior.PatternColor = RGB(128, 128, 0)
+    'The pattern color is only visible when I change the pattern from xlAutomatic to something else, here xlLightDown.
+    Application.ScreenUpdating = True
+End Sub
+
+
+Sub Worksheet_SelectionChange(ByVal Target As Range)
+    'The part that lets you play the game.
+    Static LastPick As String, LastPickAddress As String
+    'Static variables, so their values are retained between executions.
+    If Target.Count > 1 Then [A1].CurrentRegion.Interior.Pattern = xlAutomatic: Exit Sub
+    'If the selected range has more than one cell, we leave.
+    If Target.Value = "" Then [A1].CurrentRegion.Interior.Pattern = xlAutomatic: Exit Sub
+    'if the selected cell is empty, we leave.
+    If FilledNeighbors(Target) = 4 Then [A1].CurrentRegion.Interior.Pattern = xlAutomatic: Exit Sub
+    'If the selected cell has no outside edge, it can't be picked and we leave.
+    If LastPick = "" Then
+        LastPick = Target.Value
+        LastPickAddress = Target.Address
+        Target.Interior.Pattern = xlPatternLightDown
+        Exit Sub
+    End If
+    'If we have not left so far, and we don't have a last pick, we save the selected cell as last pick and enable the pattern.
+    If LastPickAddress = Target.Address Then [A1].CurrentRegion.Interior.Pattern = xlAutomatic: Exit Sub
+    'If we selected the same cell as the last pick, we leave.
+    If LastPick <> Target.Value Then LastPick = "": [A1].CurrentRegion.Interior.Pattern = xlAutomatic: Exit Sub
+    'If the last pick and the selected cell don't have the same value, we leave.
+    LastPickFloor = MyMatch(ColorArray, Range(LastPickAddress).Interior.Color)
+    LastPickRow = Range(LastPickAddress).Row
+    LastPickCol = Range(LastPickAddress).Column
+    TargetFloor = MyMatch(ColorArray, Target.Interior.Color)
+    'We use the color of the cell to find which floor it belonged to.
+    Floors(LastPickFloor)(LastPickRow, LastPickCol) = ""
+    Floors(TargetFloor)(Target.Row, Target.Column) = ""
+    'Otherwise, erase the value from the array of arrays and display it all over again.
+    [A1].CurrentRegion.Interior.Pattern = xlAutomatic
+    Call DisplayLevels
+    LastPick = ""
+End Sub
+
+Function FilledNeighbors(Target As Range) As Integer
+    'Returns the number of cells around the target that are not empty.
+    'Only counts darker neighbors.
+    On Error Resume Next
+    'On Error Resume Next lets me ignore errors when I look at Cells(0, 1).
+    'Since it executes the next line of code, I have the next line of code be useless (DoNothing = 0).
+    If Target.Interior.Color = vbWhite Then
+        If Target.Offset(1, 0) = "" Then DoNothing = 0 Else: FilledNeighbors = FilledNeighbors + 1
+        If Target.Offset(-1, 0) = "" Then DoNothing = 0 Else: FilledNeighbors = FilledNeighbors + 1
+        If Target.Offset(0, 1) = "" Then DoNothing = 0 Else: FilledNeighbors = FilledNeighbors + 1
+        If Target.Offset(0, -1) = "" Then DoNothing = 0 Else: FilledNeighbors = FilledNeighbors + 1
+    Else
+        If Target.Offset(1, 0) <> "" And Target.Offset(1, 0).Interior.Color <= Target.Interior.Color Then FilledNeighbors = FilledNeighbors + 1
+        If Target.Offset(-1, 0) <> "" And Target.Offset(-1, 0).Interior.Color <= Target.Interior.Color Then FilledNeighbors = FilledNeighbors + 1
+        If Target.Offset(0, 1) <> "" And Target.Offset(0, 1).Interior.Color <= Target.Interior.Color Then FilledNeighbors = FilledNeighbors + 1
+        If Target.Offset(0, -1) <> "" And Target.Offset(0, -1).Interior.Color <= Target.Interior.Color Then FilledNeighbors = FilledNeighbors + 1
+    End If
+End Function
+
+Function MyMatch(List As Variant, ToFind As Variant) As Integer
+    'A MATCH function I recoded because Excel's MATCH function causes an error if it does not find the sought value.
+    For Each Value In List
+        MyMatch = MyMatch + 1
+        If Value = ToFind Then Exit Function
+    Next
+    MyMatch = 0
+End Function
+
+
+
